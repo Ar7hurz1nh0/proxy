@@ -20,10 +20,10 @@
   "rust-analyzer.completion.postfix.enable": true,
   "files.readonlyInclude": {
     "Cargo.lock": true,
-    "logs/*": true,
     ".gitignore": true,
     ".rustfmt.toml": true,
     ".github/workflows/*": true,
+    ".vscode/launch.json": true
   },
   "[xml]": {
     "editor.defaultFormatter": "mblode.pretty-formatter"

@@ -239,6 +239,7 @@ impl Server {
   pub fn build_data_packet(
     id: &Uuid, port: &u16, separator: &str, data: &Vec<u8>,
   ) -> Vec<u8> {
+    let id = id.to_string();
     let packet = format!(
       "{} {id} {port} {} {}{separator}",
       PacketAction::DATA.value(),
@@ -251,6 +252,7 @@ impl Server {
   }
 
   pub fn close_connection_packet(id: &Uuid, separator: &String) -> Vec<u8> {
+    let id = id.to_string();
     let packet = format!(
       "{} {id}{separator}",
       PacketAction::CLOSE.value()
@@ -329,7 +331,7 @@ impl Server {
         }))
       },
       | PacketAction::CLOSE => {
-        let id = Uuid::try_parse_ascii(p.as_slice())
+        let id: Uuid = Uuid::try_parse_ascii(p.as_slice())
           .ok()
           .ok_or(ParseError::Other(ParseErrorType::ID))?;
         Ok(PacketType::Close(Packet {
@@ -350,6 +352,7 @@ impl Client {
   pub fn build_data_packet(
     id: &Uuid, separator: &str, data: &Vec<u8>,
   ) -> Vec<u8> {
+    let id = id.to_string();
     let packet = format!(
       "{} {id} {} {}{separator}",
       PacketAction::DATA.value(),
@@ -362,6 +365,7 @@ impl Client {
   }
 
   pub fn close_connection_packet(id: &Uuid, separator: &String) -> Vec<u8> {
+    let id = id.to_string();
     let packet = format!(
       "{} {id} 0{separator}",
       PacketAction::CLOSE.value()
