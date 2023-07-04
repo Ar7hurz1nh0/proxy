@@ -1,0 +1,32 @@
+{
+  "rust-analyzer.linkedProjects": ["./Cargo.toml"],
+  "editor.formatOnPaste": true,
+  "editor.formatOnSave": true,
+  "editor.formatOnType": true,
+  "editor.formatOnSaveMode": "modificationsIfAvailable",
+  "editor.defaultFormatter": "rust-lang.rust-analyzer",
+  "editor.codeActionsOnSave": {
+    "source.organizeImports": true,
+    "source.fixAll": false
+  },
+  "editor.autoIndent": "full",
+  "editor.indentSize": 2,
+  "editor.insertSpaces": true,
+  "editor.detectIndentation": false,
+  "rust-analyzer.cachePriming.enable": true,
+  "rust-analyzer.checkOnSave": true,
+  "rust-analyzer.completion.autoimport.enable": true,
+  "rust-analyzer.completion.autoself.enable": true,
+  "rust-analyzer.completion.postfix.enable": true,
+  "files.readonlyInclude": {
+    "Cargo.lock": true,
+    "logs/*": true,
+    ".gitignore": true,
+    ".rustfmt.toml": true,
+    ".github/workflows/*": true,
+  },
+  "[xml]": {
+    "editor.defaultFormatter": "mblode.pretty-formatter"
+  },
+  "rust-analyzer.showUnlinkedFileNotification": false
+}
