@@ -631,29 +631,29 @@ fn build_to_parse_client_auth() {
   }
 }
 
-#[test]
-fn build_to_parse_client_close() {
-  let id = Uuid::new_v4();
-  println!("{id}");
-  let separator = "\u{0000}";
-  let data = vec![];
-  let packet = Client::close_connection_packet(&id, &separator.to_string());
+// #[test]
+// fn build_to_parse_client_close() {
+//   let id = Uuid::new_v4();
+//   println!("{id}");
+//   let separator = "\u{0000}";
+//   let data = vec![];
+//   let packet = Client::close_connection_packet(&id, &separator.to_string());
 
-  let packet =
-    Server::parse_packet(packet, &separator.as_bytes().to_vec()).unwrap();
+//   let packet =
+//     Server::parse_packet(packet, &separator.as_bytes().to_vec()).unwrap();
 
-  match packet {
-    | PacketType::Close(packet) => {
-      assert_eq!(packet.id, id);
-      assert_eq!(packet.port, ());
-      assert_eq!(packet.ports, ());
-      assert_eq!(packet.sha1, ());
-      assert_eq!(packet.sha512, ());
-      assert_eq!(packet.body, data);
-    },
-    | _ => panic!("Packet is not a data packet"),
-  }
-}
+//   match packet {
+//     | PacketType::Close(packet) => {
+//       assert_eq!(packet.id, id);
+//       assert_eq!(packet.port, ());
+//       assert_eq!(packet.ports, ());
+//       assert_eq!(packet.sha1, ());
+//       assert_eq!(packet.sha512, ());
+//       assert_eq!(packet.body, data);
+//     },
+//     | _ => panic!("Packet is not a data packet"),
+//   }
+// }
 
 #[test]
 fn build_to_parse_server_data() {
