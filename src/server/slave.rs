@@ -1,8 +1,5 @@
 use hydrogen::{HydrogenSocket, Stream as HydrogenStream};
-use proxy_router::{
-  constants::Stream,
-  functions::{Server, Warning},
-};
+use proxy_router::functions::{Server, Stream, Warning};
 use simplelog::{debug, error, info};
 use std::{
   cell::UnsafeCell,
@@ -10,7 +7,7 @@ use std::{
   io::Error,
   net::TcpStream,
   os::{fd::FromRawFd, unix::io::RawFd},
-  sync::{Arc, Mutex},
+  sync::{atomic::AtomicBool, Arc, Mutex}, thread::Builder,
 };
 use uuid::Uuid;
 
@@ -48,17 +45,16 @@ impl hydrogen::Handler for SlaveListener {
   fn on_server_created(&mut self, _: RawFd) {
     // Do any secific flag/option setting on the underlying listening fd.
     // This will be the fd that accepts all incoming connections.
-    info!("Server created");
+    info!("<blue>Slave server created</>");
     info!(
-      "Listening on: {}:{}",
+      "<blue>Listening on:</> <magenta>{}</>:<yellow>{}</>",
       self.config.listen.addr, self.config.listen.port
     );
-    info!("Max threads: {}", self.config.threads);
-    info!(
+    debug!("Max threads: {}", self.config.threads);
+    debug!(
       "Concurrency expected: {}",
       self.config.concurrency
     );
-    info!("Waiting for authentication...");
   }
 
   fn on_new_connection(
@@ -159,9 +155,11 @@ impl hydrogen::Handler for SlaveListener {
 }
 
 impl SlaveListener {
-  pub fn begin(config: &ServerConfig) -> () {
-    let config: ServerConfig = config.to_owned();
-    hydrogen::begin(
+  pub fn begin(config: ServerConfig, drop_handler: &Arc<AtomicBool>) -> Result<std::thread::JoinHandle<()>, Error> {
+    let atomic_clone = Arc::clone(&drop_handler);
+    Builder::new()
+      .name(format!("slave-{}", config.listen.port))
+      .spawn(move || hydrogen::begin(
       Box::new(SlaveListener {
         connections: HashMap::new(),
         config: config.to_owned(),
@@ -174,6 +172,7 @@ impl SlaveListener {
         max_threads: config.threads,
         pre_allocated: config.concurrency,
       },
-    );
+      Some(atomic_clone),
+    ))
   }
 }

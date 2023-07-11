@@ -1,8 +1,13 @@
 mod config;
 mod socket;
-mod socket2;
 
-use std::{process::exit, thread};
+use std::{
+  sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+  },
+  thread,
+};
 
 use clap::{value_parser, Arg, ArgAction, Command};
 use proxy_router::logging::{init_logger, LoggerSettings};
@@ -152,20 +157,23 @@ fn main() {
     | _ => (),
   }
 
+  let atomic = Arc::new(AtomicBool::new(false));
   let mut signals: signal_hook::iterator::SignalsInfo =
     Signals::new(&[SIGINT, SIGTERM]).unwrap();
 
+  let atomic_clone = Arc::clone(&atomic);
   thread::spawn(move || {
     for sig in signals.forever() {
+      println!("");
       match sig {
-        | SIGINT => info!("Received SIGINT"),
-        | SIGTERM => info!("Received SIGTERM"),
+        | SIGINT => warn!("Received SIGINT"),
+        | SIGTERM => warn!("Received SIGTERM"),
         | _ => unreachable!(),
       }
-      exit(0);
+      atomic_clone.store(true, Ordering::SeqCst);
     }
   });
 
   let config = config::get_settings();
-  socket::connect(&config);
+  socket::connect(&config, Arc::clone(&atomic));
 }

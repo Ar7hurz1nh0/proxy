@@ -1,6 +1,6 @@
 mod config;
 mod slave;
-mod socket;
+mod master;
 
 use proxy_router::logging::{init_logger, LoggerSettings};
 
@@ -169,5 +169,5 @@ async fn main() {
   });
 
   let config = config::get_settings();
-  socket::MasterListener::start(&config);
+  master::MasterListener::start(&config);
 }

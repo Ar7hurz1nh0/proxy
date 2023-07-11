@@ -5,8 +5,9 @@ use std::{
 };
 
 use once_cell::sync::Lazy;
-use proxy_router::constants::{
-  ConfigFile, Runtime, DEFAULT_THREAD_COUNT, SETTING_FILE_PATH,
+use proxy_router::{
+  functions::{ConfigFile, Runtime},
+  constants::{DEFAULT_THREAD_COUNT, SETTING_FILE_PATH,}
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{from_reader, to_string_pretty, Error};

@@ -412,7 +412,7 @@ fn parse_data_client() {
   packet.extend(separator.clone());
   packet.extend(data.clone());
 
-  match Client::parse_packet(packet.clone(), &separator) {
+  match Client::parse_packet(&packet.clone(), &separator) {
     | Ok(packet_test) => match packet_test {
       | PacketType::Data(packet_test) => {
         assert_eq!(packet_test.id, id);
@@ -451,7 +451,7 @@ fn parse_auth_client() {
   packet.extend(separator.clone());
   packet.extend(data.clone());
 
-  match Client::parse_packet(packet.clone(), &separator) {
+  match Client::parse_packet(&packet.clone(), &separator) {
     | Ok(_) => panic!("Packet should not be parsed"),
     | _ => (),
   }
@@ -468,7 +468,7 @@ fn parse_close_client() {
   packet.extend(format!("{id}").as_bytes().to_vec());
   packet.extend(separator.clone());
 
-  match Client::parse_packet(packet.clone(), &separator) {
+  match Client::parse_packet(&packet.clone(), &separator) {
     | Ok(packet_test) => match packet_test {
       | PacketType::Close(packet_test) => {
         assert_eq!(packet_test.id, id);
@@ -631,29 +631,29 @@ fn build_to_parse_client_auth() {
   }
 }
 
-// #[test]
-// fn build_to_parse_client_close() {
-//   let id = Uuid::new_v4();
-//   println!("{id}");
-//   let separator = "\u{0000}";
-//   let data = vec![];
-//   let packet = Client::close_connection_packet(&id, &separator.to_string());
+#[test]
+fn build_to_parse_client_close() {
+  let id = Uuid::new_v4();
+  println!("{id}");
+  let separator = "\u{0000}";
+  let data = vec![];
+  let packet = Client::close_connection_packet(&id, &separator.to_string());
 
-//   let packet =
-//     Server::parse_packet(packet, &separator.as_bytes().to_vec()).unwrap();
+  let packet =
+    Server::parse_packet(packet, &separator.as_bytes().to_vec()).unwrap();
 
-//   match packet {
-//     | PacketType::Close(packet) => {
-//       assert_eq!(packet.id, id);
-//       assert_eq!(packet.port, ());
-//       assert_eq!(packet.ports, ());
-//       assert_eq!(packet.sha1, ());
-//       assert_eq!(packet.sha512, ());
-//       assert_eq!(packet.body, data);
-//     },
-//     | _ => panic!("Packet is not a data packet"),
-//   }
-// }
+  match packet {
+    | PacketType::Close(packet) => {
+      assert_eq!(packet.id, id);
+      assert_eq!(packet.port, ());
+      assert_eq!(packet.ports, ());
+      assert_eq!(packet.sha1, ());
+      assert_eq!(packet.sha512, ());
+      assert_eq!(packet.body, data);
+    },
+    | _ => panic!("Packet is not a data packet"),
+  }
+}
 
 #[test]
 fn build_to_parse_server_data() {
@@ -664,7 +664,7 @@ fn build_to_parse_server_data() {
   let packet = Server::build_data_packet(&id, &port, &separator, &data);
 
   let packet =
-    Client::parse_packet(packet, &separator.as_bytes().to_vec()).unwrap();
+    Client::parse_packet(&packet, &separator.as_bytes().to_vec()).unwrap();
 
   match packet {
     | PacketType::Data(packet) => {
@@ -687,7 +687,7 @@ fn build_to_parse_server_close() {
   let packet = Server::close_connection_packet(&id, &separator.to_string());
 
   let packet =
-    Client::parse_packet(packet, &separator.as_bytes().to_vec()).unwrap();
+    Client::parse_packet(&packet, &separator.as_bytes().to_vec()).unwrap();
 
   match packet {
     | PacketType::Close(packet) => {
