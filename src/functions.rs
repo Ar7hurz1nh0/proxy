@@ -270,7 +270,7 @@ impl Server {
   /// Parses a packet from the client
   ///
   pub fn parse_packet(
-    packet: Vec<u8>, separator: &Vec<u8>,
+    packet: &Vec<u8>, separator: &Vec<u8>,
   ) -> Result<PacketType<Client>, ParseError> {
     let (header, body) = split(&packet, separator)
       .ok_or(ParseError::Header(ParseErrorType::Type))?;

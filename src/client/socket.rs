@@ -33,13 +33,14 @@ pub async fn connect(
     info!("Connecting to {address}...");
     let stream = TcpStream::connect(address.clone());
     if stream.is_err() {
-      warn!("Failed to connect to {address}.");
+      warn!("Failed to connect to {address}: {}", stream.unwrap_err());
       sleep(Duration::from_secs(5)).await;
       continue;
     }
     let mut stream = stream.unwrap();
     stream.set_nonblocking(true).unwrap();
     stream.set_nodelay(true).unwrap();
+    info!("Connected to {address}");
     stream
       .write_all(
         Client::build_auth_packet(
@@ -50,6 +51,7 @@ pub async fn connect(
         .as_slice(),
       )
       .unwrap();
+    info!("Client authenticated");
 
     let stream = Arc::new(Mutex::new(stream));
     let (sender, receiver) = mpsc::channel::<Vec<u8>>();
@@ -62,7 +64,7 @@ pub async fn connect(
     let connections_clone = Arc::clone(&connections);
     let sender = Arc::new(Mutex::new(sender));
     let atomic = Arc::clone(&drop_handler);
-    let from_server = tokio::spawn(async move {
+    let from_server = tokio::task::spawn(async move {
       let connections = connections_clone;
       while !atomic.load(Ordering::Relaxed) {
         let mut stream = stream_ref_clone.lock().await;
@@ -132,6 +134,7 @@ pub async fn connect(
                             .unwrap();
                           connections_lock
                             .insert(packet.id, Arc::new(connection));
+                          info!("{} open.", packet.id);
                         },
                         | Err(err) => {
                           error!("Error: {}", err);
@@ -145,7 +148,7 @@ pub async fn connect(
                     if let Some(connection) = connection {
                       connection.drop_handler.store(true, Ordering::Relaxed);
                       connections_lock.remove(&packet.id);
-                      info!("Connection {} closed.", packet.id);
+                      info!("Closing {}.", packet.id);
                     }
                   },
                   | _ => {
@@ -166,21 +169,26 @@ pub async fn connect(
           },
         }
       }
+      atomic.store(true, Ordering::Relaxed);
     });
 
     let atomic = Arc::clone(&drop_handler);
     let stream_ref_clone = Arc::clone(&stream);
     let receiver = Arc::new(Mutex::new(receiver));
-    let from_client = tokio::spawn(async move {
+    let from_client = tokio::task::spawn(async move {
       while !atomic.load(Ordering::Relaxed) {
         let mut stream = stream_ref_clone.lock().await;
         let receiver = receiver.lock().await;
         let msg = receiver.try_recv();
         match msg {
-          | Ok(msg) => stream.write_all(msg.as_slice()).unwrap(),
+          | Ok(msg) => {
+            stream.write_all(msg.as_slice()).unwrap();
+            trace!("Wrote {} to the main socket", msg.len());
+          },
           | _ => {},
         }
       }
+      atomic.store(true, Ordering::Relaxed);
     });
 
     from_server.await.unwrap();
@@ -201,9 +209,8 @@ where
   Address: ToSocketAddrs, std::string::String: From<Address>
 {
   let address: String = address.into();
-  debug!("{uuid} -> {address}");
   let atomic = Arc::new(AtomicBool::new(false));
-
+  
   // Channel to send data to the server
   let tx = Arc::clone(&sender);
 
@@ -213,13 +220,16 @@ where
   let rx = Arc::new(Mutex::new(rx));
 
   let stream = TcpStream::connect(address.to_owned())?;
+  stream.set_nodelay(true)?;
+  stream.set_nonblocking(true)?;
   let stream = Arc::new(Mutex::new(stream));
+  debug!("{uuid} -> {address}");
 
   let atomic_clone = Arc::clone(&atomic);
   let stream_clone = Arc::clone(&stream);
   let uuid = uuid.to_owned();
   let config_clone = config.clone();
-  tokio::spawn(async move {
+  tokio::task::spawn(async move {
     while !drop_handler.load(Ordering::Relaxed)
       && !atomic_clone.load(Ordering::Relaxed)
     {

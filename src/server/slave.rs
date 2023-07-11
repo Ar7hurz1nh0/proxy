@@ -7,7 +7,12 @@ use std::{
   io::Error,
   net::TcpStream,
   os::{fd::FromRawFd, unix::io::RawFd},
-  sync::{atomic::AtomicBool, Arc, Mutex}, thread::Builder,
+  sync::{atomic::AtomicBool, Arc, Mutex},
+  thread::Builder,
+};
+use tokio::{
+  io::AsyncWriteExt, net::TcpStream as TokioTcpStream,
+  sync::Mutex as TokioMutex,
 };
 use uuid::Uuid;
 
@@ -23,7 +28,7 @@ pub struct ServerConfig {
   pub listen: Address,
   pub threads: usize,
   pub concurrency: usize,
-  pub socket: Arc<Mutex<HydrogenSocket>>,
+  pub socket: Arc<TokioMutex<TokioTcpStream>>,
   pub connections: Arc<Mutex<HashMap<Uuid, SenderPacket>>>,
 }
 
@@ -37,7 +42,7 @@ pub struct SenderPacket {
 pub struct SlaveListener {
   connections: HashMap<RawFd, Uuid>,
   config: ServerConfig,
-  socket: Arc<Mutex<HydrogenSocket>>,
+  socket: Arc<TokioMutex<TokioTcpStream>>,
   warn: Warning,
 }
 
@@ -101,18 +106,14 @@ impl hydrogen::Handler for SlaveListener {
           &self.config.separator,
           &buffer,
         );
-        match self.socket.lock() {
-          | Ok(master_socket) => {
-            master_socket.send(packet.as_slice());
-          },
-          | Err(err) => {
-            error!("Failed while aquiring lock from socket: {err}");
-            self.warn.warn(
-              "This may result in a hanging connection or a broken pipe"
-                .to_string(),
-            );
-          },
-        }
+        let future = Box::pin(async {
+          let mut master_socket = self.socket.lock().await;
+          let write = master_socket.write_all(packet.as_slice());
+          if write.await.is_err() {
+            error!("Failed to write to master socket");
+          }
+        });
+        tokio::runtime::Runtime::new().unwrap().block_on(future)
       },
       | None => {
         error!(
@@ -155,24 +156,28 @@ impl hydrogen::Handler for SlaveListener {
 }
 
 impl SlaveListener {
-  pub fn begin(config: ServerConfig, drop_handler: &Arc<AtomicBool>) -> Result<std::thread::JoinHandle<()>, Error> {
+  pub fn begin(
+    config: ServerConfig, drop_handler: &Arc<AtomicBool>,
+  ) -> Result<std::thread::JoinHandle<()>, Error> {
     let atomic_clone = Arc::clone(&drop_handler);
-    Builder::new()
-      .name(format!("slave-{}", config.listen.port))
-      .spawn(move || hydrogen::begin(
-      Box::new(SlaveListener {
-        connections: HashMap::new(),
-        config: config.to_owned(),
-        socket: Arc::clone(&config.socket),
-        warn: Warning::new(5),
-      }),
-      hydrogen::Config {
-        addr: config.listen.addr,
-        port: config.listen.port,
-        max_threads: config.threads,
-        pre_allocated: config.concurrency,
+    Builder::new().name(format!("slave-{}", config.listen.port)).spawn(
+      move || {
+        hydrogen::begin(
+          Box::new(SlaveListener {
+            connections: HashMap::new(),
+            config: config.to_owned(),
+            socket: Arc::clone(&config.socket),
+            warn: Warning::new(5),
+          }),
+          hydrogen::Config {
+            addr: config.listen.addr,
+            port: config.listen.port,
+            max_threads: config.threads,
+            pre_allocated: config.concurrency,
+          },
+          Some(atomic_clone),
+        )
       },
-      Some(atomic_clone),
-    ))
+    )
   }
 }

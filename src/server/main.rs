@@ -11,10 +11,9 @@ use signal_hook::{
 };
 #[allow(unused_imports)]
 use simplelog::{debug, error, info, trace, warn};
-use std::{process::exit, thread};
+use std::{thread, sync::{atomic::{AtomicBool, Ordering}, Arc}};
 
-#[tokio::main]
-async fn main() {
+fn main() {
   let mut logger_settings = LoggerSettings {
     level: simplelog::LevelFilter::Info,
     file_level: simplelog::LevelFilter::Debug,
@@ -153,9 +152,11 @@ async fn main() {
     | _ => (),
   }
 
+  let atomic = Arc::new(AtomicBool::new(false));
   let mut signals: signal_hook::iterator::SignalsInfo =
     Signals::new(&[SIGINT, SIGTERM]).unwrap();
 
+  let atomic_clone = Arc::clone(&atomic);
   thread::spawn(move || {
     for sig in signals.forever() {
       println!("");
@@ -164,10 +165,10 @@ async fn main() {
         | SIGTERM => warn!("Received SIGTERM"),
         | _ => unreachable!(),
       }
-      exit(0);
+      atomic_clone.store(true, Ordering::Relaxed);
     }
   });
 
   let config = config::get_settings();
-  master::MasterListener::start(&config);
+  master::MasterListener::start(&config, Arc::clone(&atomic));
 }

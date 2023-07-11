@@ -1,257 +1,215 @@
-use hydrogen::{HydrogenSocket, Stream as HydrogenStream};
-use proxy_router::functions::{PacketType, Runtime, Server, Stream, Warning};
-use simplelog::{debug, error, info, warn};
+use hydrogen::Stream as HydrogenStream;
+use proxy_router::functions::{PacketType, Runtime, Server};
+use simplelog::{debug, error, info, trace, warn};
 use std::{
-  cell::UnsafeCell,
   collections::HashMap,
   io::Error,
-  net::TcpStream,
-  os::{
-    fd::FromRawFd,
-    unix::io::{AsRawFd, RawFd},
-  },
   sync::{
     atomic::{AtomicBool, Ordering},
-    Arc, Mutex,
+    Arc,
   },
+  time::Duration,
 };
+use tokio::{sync::Mutex, time::sleep, net::TcpListener, io::AsyncReadExt};
 use uuid::Uuid;
 
 use crate::slave::SenderPacket;
 
 use super::slave::{Address, ServerConfig, SlaveListener};
 
-// The following will be our server that handles all reported events
+#[derive(Clone)]
 pub struct MasterListener {
   config: crate::config::Config<Runtime>,
   was_authed: bool,
-  auth_fd: Option<RawFd>,
-  warn: Warning,
-  connections: Arc<Mutex<HashMap<Uuid, SenderPacket>>>,
-  slaves: Vec<Arc<AtomicBool>>,
-}
-
-impl hydrogen::Handler for MasterListener {
-  fn on_server_created(&mut self, _: RawFd) {
-    // Do any secific flag/option setting on the underlying listening fd.
-    // This will be the fd that accepts all incoming connections.
-    info!("<green>Server created</>");
-    info!(
-      "<green>Listening on:</> <magenta>{}</>:<yellow>{}</>",
-      self.config.listen.host, self.config.listen.port
-    );
-    debug!("Max threads: {}", self.config.threads);
-    debug!(
-      "Concurrency expected: {}",
-      self.config.concurrency
-    );
-    info!("<yellow>Waiting for authentication...</>");
-  }
-
-  fn on_new_connection(
-    &mut self, fd: RawFd,
-  ) -> Arc<UnsafeCell<dyn HydrogenStream>> {
-    let tcp_stream = unsafe { TcpStream::from_raw_fd(fd) };
-    let stream = Stream::from_tcp_stream(tcp_stream);
-    let uuid = stream.id;
-    info!("New connection with fd {fd} has id {uuid}");
-    Arc::new(UnsafeCell::new(stream))
-  }
-
-  fn on_data_received(&mut self, mut socket: HydrogenSocket, buffer: Vec<u8>) {
-    // Called when a complete, consumer defined, chunk of data has been read.
-    if !self.was_authed {
-      let packet = Server::parse_packet(
-        buffer,
-        &self.config.separator.as_bytes().to_vec(),
-      );
-      match packet {
-        | Ok(packet) => {
-          match packet {
-            | PacketType::Auth(packet) => {
-              if self.config.auth.as_bytes().to_vec() == packet.body {
-                self.was_authed = true;
-                self.auth_fd = Some(socket.as_raw_fd());
-                info!(
-                  "Authenticated connection: {}",
-                  socket.as_raw_fd()
-                );
-                for port in packet.ports {
-                  let config = ServerConfig {
-                    separator: self.config.separator.clone(),
-                    listen: Address {
-                      port,
-                      addr: self.config.listen.host.clone(),
-                    },
-                    threads: self.config.threads,
-                    concurrency: self.config.concurrency,
-                    socket: Arc::new(Mutex::new(socket.clone())),
-                    connections: Arc::clone(&self.connections),
-                  };
-                  let atomic = Arc::new(AtomicBool::new(false));
-                  // FIXME: The next line somehow causes the hydrogen::Handler::on_connection_removed to not be called
-                  //        when the connection is closed. This is a problem because the server should restart when
-                  //        the main connection is closed.
-                  match SlaveListener::begin(config, &atomic) {
-                    | Ok(_) => {
-                      info!("Started slave on port: {port}");
-                      self.slaves.push(atomic);
-                    },
-                    | Err(err) => {
-                      error!("Failed to start slave on port {port}: {err}");
-                    },
-                  }
-                }
-              }
-            },
-            | _ => {
-              error!("Expected a auth packet, got something else. Closing connection.");
-              match socket.shutdown() {
-                | Ok(_) => info!("Shutdown connection"),
-                | Err(err) => warn!("Error shutting down connection: {err}"),
-              }
-            },
-          }
-        },
-        | Err(err) => {
-          error!("Error parsing packet: {}", err.value());
-          self.warn.warn(
-            "This may result in a hanging connection or a broken pipe"
-              .to_string(),
-          );
-        },
-      }
-    } else {
-      let packet = Server::parse_packet(
-        buffer,
-        &self.config.separator.as_bytes().to_vec(),
-      );
-      match packet {
-        | Ok(packet) => {
-          match packet {
-            | PacketType::Data(packet) => match self.connections.lock() {
-              | Ok(connections) => match connections.get(&packet.id) {
-                | Some(stream) => match stream.socket.lock() {
-                  | Ok(mut socket) => match socket.send(&packet.body) {
-                    | Ok(_) => debug!(
-                      "Wrote data to socket: {}",
-                      socket.as_raw_fd()
-                    ),
-                    | Err(err) => error!(
-                      "Failed to write data to socket ({}): {err}",
-                      socket.as_raw_fd()
-                    ),
-                  },
-                  | Err(err) => {
-                    error!("Failed to aquire lock for socket: {err}");
-                    self.warn.warn("This may result in a hanging connection or a broken pipe".to_string());
-                  },
-                },
-                | None => debug!(
-                  "Failed to find connection for socket: {}",
-                  packet.id
-                ),
-              },
-              | Err(err) => {
-                error!("Failed while aquiring lock for connections: {err}");
-                self.warn.warn(
-                  "This may result in a hanging connection or a broken pipe"
-                    .to_string(),
-                );
-              },
-            },
-            | PacketType::Close(packet) => match self.connections.lock() {
-              | Ok(connections) => match connections.get(&packet.id) {
-                | Some(connection) => match connection.socket.lock() {
-                  | Ok(mut socket) => match socket.shutdown() {
-                    | Ok(_) => debug!(
-                      "Closed connection: {}",
-                      socket.as_raw_fd()
-                    ),
-                    | Err(err) => error!("Failed to close connection: {err}"),
-                  },
-                  | Err(err) => error!(
-                    "Failed to find connection for socket ({}): {err}",
-                    socket.as_raw_fd()
-                  ),
-                },
-                | None => error!(
-                  "Failed to find connection for socket: {}",
-                  socket.as_raw_fd()
-                ),
-              },
-              | Err(err) => {
-                error!("Failed while aquiring lock for connections: {err}");
-                self.warn.warn(
-                  "This may result in a hanging connection or a broken pipe"
-                    .to_string(),
-                );
-              },
-            },
-            | _ => {
-              error!(
-              "Expected a data packet, got something else. Closing connection. (fd: {})",
-              socket.as_raw_fd()
-            );
-              match socket.shutdown() {
-                | Ok(_) => {
-                  info!("Shutdown connection");
-                },
-                | Err(err) => {
-                  error!("Error shutting down connection: {err}");
-                },
-              }
-            },
-          }
-        },
-        | Err(err) => {
-          error!("Error parsing packet: {}", err.value());
-          self.warn.warn(
-            "This may result in a hanging connection or a broken pipe"
-              .to_string(),
-          );
-        },
-      }
-    }
-  }
-
-  fn on_connection_removed(&mut self, fd: RawFd, err: Error) {
-    debug!("{fd} removed: {err}");
-    match self.auth_fd {
-      | Some(auth_fd) => {
-        if auth_fd == fd {
-          warn!("Auth connection closed. Restarting server.");
-          for atomic in &self.slaves {
-            atomic.store(true, Ordering::Relaxed);
-          }
-          self.was_authed = false;
-          self.auth_fd = None;
-        }
-      },
-      | None => {},
-    }
-  }
+  connections: Arc<std::sync::Mutex<HashMap<Uuid, SenderPacket>>>,
 }
 
 impl MasterListener {
-  pub fn start(config: &crate::config::Config<Runtime>) {
+  pub fn start(
+    config: &crate::config::Config<Runtime>, drop_handler: Arc<AtomicBool>,
+  ) {
     let config = config.to_owned();
-    hydrogen::begin(
-      Box::new(MasterListener {
+    server(
+      MasterListener {
         config: config.to_owned(),
         was_authed: false,
-        warn: Warning::new(5),
-        connections: Arc::new(Mutex::new(HashMap::new())),
-        slaves: vec![],
-        auth_fd: None,
-      }),
-      hydrogen::Config {
-        addr: config.listen.host,
-        port: config.listen.port,
-        max_threads: config.threads,
-        pre_allocated: config.concurrency,
+        connections: Arc::new(std::sync::Mutex::new(HashMap::new())),
       },
-      None,
+      drop_handler,
+    )
+  }
+}
+
+#[tokio::main]
+async fn server(init: MasterListener, drop_handler: Arc<AtomicBool>) {
+  while !Arc::clone(&drop_handler).load(Ordering::Relaxed) {
+    let address = format!(
+      "{}:{}",
+      init.config.listen.host, init.config.listen.port
     );
+    let listener = TcpListener::bind(address.to_owned()).await;
+    if listener.is_err() {
+      error!(
+        "Couldn't bind server to {address}: {}",
+        listener.unwrap_err()
+      );
+      sleep(Duration::from_secs(5)).await;
+      continue;
+    }
+    let listener = listener.unwrap();
+    // listener.set_nonblocking(true).unwrap();
+    let init = Arc::new(Mutex::new(init.clone()));
+    info!("Successfully bind server to {address}");
+
+    let listener = Arc::new(Mutex::new(listener));
+
+    let atomic = Arc::clone(&drop_handler);
+    let listener_clone = Arc::clone(&listener);
+    let separator = init.lock().await.config.separator.to_owned();
+    let main_loop = tokio::task::spawn(async move {
+      while !atomic.load(Ordering::Relaxed) {
+        let listener = listener_clone.lock().await;
+        let stream = listener.accept().await;
+        if stream.is_err() {
+          continue;
+        }
+        let (stream, _) = stream.unwrap();
+        let stream = Arc::new(Mutex::new(stream));
+        let mut buffer: Vec<u8> = Vec::new();
+        // let mut times_read = 0;
+
+        let msg: Result<Option<Vec<u8>>, Error> = loop {
+          let mut buf: [u8; 4098] = [0u8; 4098];
+          let stream_lock = Arc::clone(&stream);
+          let mut stream_lock = stream_lock.lock().await;
+          // match stream_lock.read(&mut buf).await {
+          //   | Ok(bytes_read) => {
+          //     if bytes_read == 0 {
+          //       if times_read > 0 {
+          //         break Ok(Some(buffer));
+          //       }
+          //       break Ok(None);
+          //     }
+          //     trace!("Read {bytes_read} bytes.");
+          //     times_read += 1;
+          //     buffer.extend_from_slice(&buf[..bytes_read]);
+          //   },
+          //   | Err(err) => {
+          //     if err.kind() == ErrorKind::WouldBlock {
+          //       if times_read > 0 {
+          //         break Ok(Some(buffer));
+          //       }
+          //       break Ok(None);
+          //     } else {
+          //       break Err(err);
+          //     }
+          //   },
+          // }
+          let bytes_read = stream_lock.read(&mut buf).await.unwrap();
+          if bytes_read == 0 {
+            break Ok(None)
+          }
+          buffer.extend_from_slice(&buf[..bytes_read]);
+          break Ok(Some(buffer));
+        };
+
+        match msg {
+          | Ok(msg) => {
+            if let Some(msg) = msg {
+              let packet =
+                Server::parse_packet(&msg, &separator.as_bytes().to_vec());
+              let mut init = init.lock().await;
+              match packet {
+                | Ok(packet) => match packet {
+                  | PacketType::Data(packet) => {
+                    if init.was_authed {
+                      let connections = init.connections.lock().unwrap();
+                      let connection = connections.get(&packet.id);
+                      if let Some(connection) = connection {
+                        let mut socket = connection.socket.lock().unwrap();
+                        socket.send(&packet.body).unwrap();
+                        trace!("CLIENT -> {}", packet.id);
+                      } else {
+                        warn!("Received DATA packet for unknown connection!");
+                      }
+                    } else {
+                      warn!(
+                        "Unexpected DATA packet before any authentication!"
+                      );
+                    }
+                  },
+                  | PacketType::Close(packet) => {
+                    if init.was_authed {
+                      let connections = init.connections.lock().unwrap();
+                      let connection = connections.get(&packet.id);
+                      if let Some(connection) = connection {
+                        let mut socket = connection.socket.lock().unwrap();
+                        socket.shutdown().unwrap();
+                        info!("{} closed.", packet.id);
+                      } else {
+                        warn!("Received CLOSE packet for unknown connection!");
+                      }
+                    } else {
+                      warn!(
+                        "Unexpected CLOSE packet before any authentication!"
+                      );
+                    }
+                  },
+                  | PacketType::Auth(packet) => {
+                    if !init.was_authed {
+                      if packet.body == init.config.auth.as_bytes().to_vec() {
+                        info!("Client authenticated!");
+                        init.was_authed = true;
+                        for port in packet.ports {
+                          let config = ServerConfig {
+                            separator: init.config.separator.clone(),
+                            listen: Address {
+                              port,
+                              addr: init.config.listen.host.clone(),
+                            },
+                            threads: init.config.threads,
+                            concurrency: init.config.concurrency,
+                            socket: Arc::clone(&stream),
+                            connections: Arc::clone(&init.connections),
+                          };
+                          let atomic = Arc::clone(&atomic);
+                          match SlaveListener::begin(config, &atomic) {
+                            | Ok(_) => {
+                              info!("Started slave on port: {port}");
+                            },
+                            | Err(err) => {
+                              error!(
+                                "Failed to start slave on port {port}: {err}"
+                              );
+                            },
+                          }
+                        }
+                      }
+                    } else {
+                      warn!("Client tried to auth twice!")
+                    }
+                  },
+                },
+                | Err(err) => {
+                  debug!("Msg lenght: {}", msg.len());
+                  error!("Error: {}", err);
+                },
+              }
+            }
+          },
+          | Err(err) => {
+            debug!("Error: {}", err);
+            break;
+          },
+        }
+      }
+      atomic.store(true, Ordering::Relaxed)
+    });
+
+    let atomic = Arc::clone(&drop_handler);
+    while !atomic.load(Ordering::Relaxed) {}
+    main_loop.abort();
+
+    info!("Client connection ended.");
   }
 }

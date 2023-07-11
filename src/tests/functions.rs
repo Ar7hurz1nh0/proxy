@@ -502,7 +502,7 @@ fn parse_data_server() {
   packet.extend(separator.clone());
   packet.extend(data.clone());
 
-  match Server::parse_packet(packet.clone(), &separator) {
+  match Server::parse_packet(&packet, &separator) {
     | Ok(packet_test) => match packet_test {
       | PacketType::Data(packet_test) => {
         assert_eq!(packet_test.id, id);
@@ -542,7 +542,7 @@ fn parse_auth_server() {
     ports.iter().map(|x| x.to_string()).collect::<Vec<String>>().join(",")
   );
 
-  match Server::parse_packet(packet.clone(), &separator) {
+  match Server::parse_packet(&packet, &separator) {
     | Ok(packet_test) => match packet_test {
       | PacketType::Auth(packet_test) => {
         assert_eq!(packet_test.id, ());
@@ -569,7 +569,7 @@ fn parse_close_server() {
   packet.extend(format!("{id}").as_bytes().to_vec());
   packet.extend(separator.clone());
 
-  match Server::parse_packet(packet.clone(), &separator) {
+  match Server::parse_packet(&packet, &separator) {
     | Ok(packet_test) => match packet_test {
       | PacketType::Close(packet_test) => {
         assert_eq!(packet_test.id, id);
@@ -593,7 +593,7 @@ fn build_to_parse_client_data() {
   let packet = Client::build_data_packet(&id, &separator, &data);
 
   let packet =
-    Server::parse_packet(packet, &separator.as_bytes().to_vec()).unwrap();
+    Server::parse_packet(&packet, &separator.as_bytes().to_vec()).unwrap();
 
   match packet {
     | PacketType::Data(packet) => {
@@ -616,7 +616,7 @@ fn build_to_parse_client_auth() {
   let packet = Client::build_auth_packet(&auth, &ports, &separator.to_string());
 
   let packet =
-    Server::parse_packet(packet, &separator.as_bytes().to_vec()).unwrap();
+    Server::parse_packet(&packet, &separator.as_bytes().to_vec()).unwrap();
 
   match packet {
     | PacketType::Auth(packet) => {
@@ -640,7 +640,7 @@ fn build_to_parse_client_close() {
   let packet = Client::close_connection_packet(&id, &separator.to_string());
 
   let packet =
-    Server::parse_packet(packet, &separator.as_bytes().to_vec()).unwrap();
+    Server::parse_packet(&packet, &separator.as_bytes().to_vec()).unwrap();
 
   match packet {
     | PacketType::Close(packet) => {
