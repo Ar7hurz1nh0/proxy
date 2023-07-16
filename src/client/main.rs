@@ -10,7 +10,7 @@ use std::{
 };
 
 use clap::{value_parser, Arg, ArgAction, Command};
-use proxy_router::logging::{init_logger, LoggerSettings};
+use proxy::logging::{init_logger, LoggerSettings};
 use signal_hook::{
   consts::{SIGINT, SIGTERM},
   iterator::Signals,

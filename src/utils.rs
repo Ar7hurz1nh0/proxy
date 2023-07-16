@@ -1,15 +1,11 @@
-use hydrogen::Stream as HydrogenStream;
 use std::{
-  io::{Error, ErrorKind, Read, Write},
-  net::{Shutdown, TcpStream},
-  os::unix::io::{AsRawFd, RawFd},
   fmt::{Display, Formatter},
+  string::FromUtf8Error,
 };
 
 use digest::Digest;
 use sha1::Sha1;
 use sha2::Sha512;
-use simplelog::warn;
 use uuid::Uuid;
 
 pub enum PacketAction {
@@ -27,6 +23,7 @@ pub enum PacketAction {
   ///
   /// DATA 123e4567-e89b-12d3-a456-426614174000 8080 0a0a9f2a6772942557ab5355d76af442f8f65e01 374d794a95cdcfd8b35993185fef9ba368f160d8daf432d08ba9f1ed1e5abe6cc69291e0fa2fe0006a52570ef18c19def4e617c33ce52ef0a6e5fbe318cb0387\u0000Hello, world!
   DATA,
+
   /// Close packet
   ///
   /// This packet is used to signify that the connection should be closed.
@@ -41,6 +38,7 @@ pub enum PacketAction {
   ///
   /// CLOSE 123e4567-e89b-12d3-a456-426614174000\u0000
   CLOSE,
+
   /// Auth packet
   ///
   /// This packet is used to authenticate the first connection.
@@ -55,6 +53,40 @@ pub enum PacketAction {
   ///
   /// AUTH 8080,8081,8082\u0000CH4ng3M3!
   AUTH,
+
+  /// Auth try packet
+  /// 
+  /// This packet is used to confirm that the auth packet was received, and respond with the auth status.
+  /// 
+  /// # Usage
+  /// 
+  /// The packet must follow this format:
+  /// 
+  /// {action}{separator}{status}
+  /// 
+  /// Where status is either "success" or "forbiden".
+  /// 
+  /// ## Example
+  /// 
+  /// AUTHTRY\u0000success
+  AUTHTRY,
+
+  /// Heartbeat packet
+  /// 
+  /// This packet is used detect if the connection is still alive.
+  /// The receiver end must respond as soon as possible with a heartbeat with the same nonce.
+  /// If the receiver end does not respond in time, the connection is closed.
+  /// 
+  /// # Usage
+  /// 
+  /// The packet must follow this format:
+  /// 
+  /// HEARTBEAT{separator}{nonce}
+  /// 
+  /// ## Example
+  /// 
+  /// HEARTBEAT\u0000a1b2c3d4e5f6
+  HEARTBEAT,
 }
 
 #[derive(Debug)]
@@ -117,6 +149,8 @@ impl PacketAction {
       | "data" => PacketAction::DATA,
       | "close" => PacketAction::CLOSE,
       | "auth" => PacketAction::AUTH,
+      | "authtry" => PacketAction::AUTHTRY,
+      | "heartbeat" => PacketAction::HEARTBEAT,
       | _ => panic!("Invalid packet type: {}", string),
     }
   }
@@ -126,6 +160,8 @@ impl PacketAction {
       | PacketAction::DATA => "DATA".to_string(),
       | PacketAction::CLOSE => "CLOSE".to_string(),
       | PacketAction::AUTH => "AUTH".to_string(),
+      | PacketAction::AUTHTRY => "AUTHTRY".to_string(),
+      | PacketAction::HEARTBEAT => "HEARTBEAT".to_string(),
     }
   }
 }
@@ -243,8 +279,9 @@ pub fn split(
 
 impl Server {
   pub fn build_data_packet(
-    id: &Uuid, port: &u16, separator: &str, data: &Vec<u8>,
-  ) -> Vec<u8> {
+    id: &Uuid, port: &u16, separator: &Vec<u8>, data: &Vec<u8>,
+  ) -> Result<Vec<u8>, FromUtf8Error> {
+    let separator = String::from_utf8(separator.to_owned())?;
     let id = id.to_string();
     let packet = format!(
       "{} {id} {port} {} {}{separator}",
@@ -254,16 +291,19 @@ impl Server {
     );
     let mut packet = packet.as_bytes().to_vec();
     packet.extend(data);
-    packet
+    Ok(packet)
   }
 
-  pub fn close_connection_packet(id: &Uuid, separator: &String) -> Vec<u8> {
+  pub fn close_connection_packet(
+    id: &Uuid, separator: &Vec<u8>,
+  ) -> Result<Vec<u8>, FromUtf8Error> {
+    let separator = String::from_utf8(separator.to_owned())?;
     let id = id.to_string();
     let packet = format!(
       "{} {id}{separator}",
       PacketAction::CLOSE.value()
     );
-    packet.as_bytes().to_vec()
+    Ok(packet.as_bytes().to_vec())
   }
 
   ///
@@ -337,7 +377,10 @@ impl Server {
         }))
       },
       | PacketAction::CLOSE => {
-        let id: Uuid = Uuid::try_parse_ascii(p.as_slice())
+        let id = String::from_utf8(p)
+          .ok()
+          .ok_or(ParseError::Other(ParseErrorType::ID))?;
+        let id = Uuid::parse_str(&id)
           .ok()
           .ok_or(ParseError::Other(ParseErrorType::ID))?;
         Ok(PacketType::Close(Packet {
@@ -350,14 +393,17 @@ impl Server {
           body,
         }))
       },
+      PacketAction::AUTHTRY => todo!("AUTHTRY is currently not implemented"),
+      PacketAction::HEARTBEAT => todo!("HEARTBEAT is currently not implemented"),
     }
   }
 }
 
 impl Client {
   pub fn build_data_packet(
-    id: &Uuid, separator: &str, data: &Vec<u8>,
-  ) -> Vec<u8> {
+    id: &Uuid, separator: &Vec<u8>, data: &Vec<u8>,
+  ) -> Result<Vec<u8>, FromUtf8Error> {
+    let separator = String::from_utf8(separator.to_owned())?;
     let id = id.to_string();
     let packet = format!(
       "{} {id} {} {}{separator}",
@@ -367,21 +413,26 @@ impl Client {
     );
     let mut packet = packet.as_bytes().to_vec();
     packet.extend(data);
-    packet
+    Ok(packet)
   }
 
-  pub fn close_connection_packet(id: &Uuid, separator: &String) -> Vec<u8> {
+  pub fn close_connection_packet(
+    id: &Uuid, separator: &Vec<u8>,
+  ) -> Result<Vec<u8>, FromUtf8Error> {
+    let separator = String::from_utf8(separator.to_owned())?;
     let id = id.to_string();
     let packet = format!(
-      "{} {id} 0{separator}",
+      "{} {id}{separator}",
       PacketAction::CLOSE.value()
     );
-    packet.as_bytes().to_vec()
+    Ok(packet.as_bytes().to_vec())
   }
 
   pub fn build_auth_packet(
-    auth: &String, ports: &Vec<u16>, separator: &String,
-  ) -> Vec<u8> {
+    auth: &Vec<u8>, ports: &Vec<u16>, separator: &Vec<u8>,
+  ) -> Result<Vec<u8>, FromUtf8Error> {
+    let auth = String::from_utf8(auth.to_owned())?;
+    let separator = String::from_utf8(separator.to_owned())?;
     let ports_string = ports
       .iter()
       .map(|port| port.to_string())
@@ -391,7 +442,7 @@ impl Client {
       "{} {ports_string}{separator}{auth}",
       PacketAction::AUTH.value()
     );
-    packet.as_bytes().to_vec()
+    Ok(packet.as_bytes().to_vec())
   }
 
   ///
@@ -464,57 +515,10 @@ impl Client {
           body,
         }))
       },
-      | _ => Err(ParseError::Other(
-        ParseErrorType::Action,
-      )),
+      | PacketAction::AUTH => unimplemented!("AUTH is not suported client side"),
+      | PacketAction::AUTHTRY => todo!("AUTHTRY is currently not implemented"),
+      | PacketAction::HEARTBEAT => todo!("HEARTBEAT is currently not implemented"),
     }
-  }
-}
-
-pub struct Warning {
-  warns: u8,
-  total: u8,
-}
-
-impl Warning {
-  pub fn warn(&mut self, msg: String) {
-    self.warns += 1;
-    if self.warns < self.total {
-      let remaining = self.total - self.warns;
-      if remaining > 1 {
-        warn!("{msg} (this warning will repeat {remaining} more times)");
-      } else if remaining == 1 {
-        warn!("{msg} (this warning will repeat 1 more time)");
-      } else {
-        warn!("{msg} (THIS WARNING WILL NOT REPEAT)");
-      }
-    }
-  }
-
-  pub fn new(total: u8) -> Self {
-    Self {
-      warns: 0,
-      total,
-    }
-  }
-}
-
-impl Clone for Warning {
-  fn clone(&self) -> Self {
-    Self {
-      warns: self.warns,
-      total: self.total,
-    }
-  }
-}
-
-impl Display for Warning {
-  fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-    write!(
-      f,
-      "Warning: {}/{}",
-      self.warns, self.total
-    )
   }
 }
 
@@ -523,86 +527,3 @@ pub enum Runtime {}
 
 #[derive(Clone, Debug)]
 pub enum ConfigFile {}
-
-pub struct Stream {
-  inner: TcpStream,
-  pub id: Uuid,
-}
-
-impl Stream {
-  pub fn from_tcp_stream(tcp_stream: TcpStream) -> Stream {
-    tcp_stream.set_nonblocking(true).unwrap();
-    tcp_stream.set_nodelay(true).unwrap();
-    Stream {
-      inner: tcp_stream,
-      id: Uuid::new_v4(),
-    }
-  }
-}
-
-impl HydrogenStream for Stream {
-  // This method is called when epoll reports data is available for reading.
-  fn recv(&mut self) -> Result<Vec<Vec<u8>>, Error> {
-    let mut msgs = Vec::<Vec<u8>>::new();
-
-    // Our socket is set to non-blocking, we need to read until
-    // there is an error or the system returns WouldBlock.
-    // TcpStream offers no guarantee it will return in non-blocking mode.
-    // Double check OS specifics on this when using.
-    // https://doc.rust-lang.org/std/io/trait.Read.html#tymethod.read
-    let mut total_read = Vec::<u8>::new();
-    loop {
-      let mut buf = [0u8; 4098];
-      let read_result = self.inner.read(&mut buf);
-      if read_result.is_err() {
-        let err = read_result.unwrap_err();
-        if err.kind() == ErrorKind::WouldBlock {
-          break;
-        }
-
-        return Err(err);
-      }
-
-      let num_read = read_result.unwrap();
-      total_read.extend_from_slice(&buf[0..num_read]);
-    }
-
-    // Multiple frames, or "msgs", could have been gathered here. Break up
-    // your frames here and save remainer somewhere to come back to on the
-    // next reads....
-    //
-    // Frame break out code goes here
-    //
-
-    msgs.push(total_read);
-
-    return Ok(msgs);
-  }
-
-  // This method is called when a previous attempt to write has returned `ErrorKind::WouldBlock`
-  // and epoll has reported that the socket is now writable.
-  fn send(&mut self, buf: &[u8]) -> Result<(), Error> {
-    self.inner.write_all(buf)
-  }
-
-  // This method is called when connection has been reported as reset by epoll, or when any
-  // `std::io::Error` has been returned.
-  fn shutdown(&mut self) -> Result<(), Error> {
-    self.inner.shutdown(Shutdown::Both)
-  }
-}
-
-impl AsRawFd for Stream {
-  fn as_raw_fd(&self) -> RawFd {
-    self.inner.as_raw_fd()
-  }
-}
-
-impl Clone for Stream {
-  fn clone(&self) -> Self {
-    Stream {
-      inner: self.inner.try_clone().unwrap(),
-      id: self.id,
-    }
-  }
-}

@@ -1,4 +1,4 @@
 pub mod constants;
-pub mod functions;
+pub mod utils;
 pub mod logging;
 mod tests;

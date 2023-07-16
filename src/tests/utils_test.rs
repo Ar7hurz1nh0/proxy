@@ -1,5 +1,5 @@
 #[allow(unused_imports)]
-use crate::functions::{
+use crate::utils::{
   hash_sha1, hash_sha512, split, Client, Packet, PacketAction, PacketType,
   Server,
 };
@@ -283,9 +283,9 @@ fn split_some_to_none() {
 #[test]
 fn auth_packet() {
   let packet_test = Client::build_auth_packet(
-    &String::from("123"),
+    &String::from("123").into_bytes(),
     &vec![3000, 4000, 5000],
-    &String::from("\u{0000}"),
+    &String::from("\u{0000}").into_bytes(),
   );
 
   let packet = vec![
@@ -293,7 +293,7 @@ fn auth_packet() {
     0x30, 0x30, 0x2C, 0x35, 0x30, 0x30, 0x30, 0x0, 0x31, 0x32, 0x33,
   ];
 
-  assert_eq!(packet_test, packet);
+  assert_eq!(packet_test.unwrap(), packet);
 }
 
 #[test]
@@ -301,7 +301,11 @@ fn data_packet_client() {
   let id = "8c95a08a-97d1-4330-b5bf-87866baae5de";
   let id = Uuid::from_str(id).unwrap();
   let data = vec![0x0, 0x01, 0x26, 0x42, 0xAF, 0xFF];
-  let packet_test = Client::build_data_packet(&id, "\u{0000}", &data.clone());
+  let packet_test = Client::build_data_packet(
+    &id,
+    &"\u{0000}".as_bytes().to_vec(),
+    &data.clone(),
+  );
 
   let sha1_hash = hash_sha1(&data).as_bytes().to_vec();
   let sha512_hash = hash_sha512(&data).as_bytes().to_vec();
@@ -315,7 +319,7 @@ fn data_packet_client() {
   packet.extend(vec![0x00]);
   packet.extend(vec![0x00, 0x01, 0x26, 0x42, 0xAF, 0xFF]);
 
-  assert_eq!(packet_test, packet);
+  assert_eq!(packet_test.unwrap(), packet);
 }
 
 #[test]
@@ -323,8 +327,12 @@ fn data_packet_server() {
   let id = "8c95a08a-97d1-4330-b5bf-87866baae5de";
   let id = Uuid::from_str(id).unwrap();
   let data = vec![0x0, 0x01, 0x26, 0x42, 0xAF, 0xFF];
-  let packet_test =
-    Server::build_data_packet(&id, &3000, "\u{0000}", &data.clone());
+  let packet_test = Server::build_data_packet(
+    &id,
+    &3000,
+    &"\u{0000}".as_bytes().to_vec(),
+    &data.clone(),
+  );
 
   let sha1_hash = hash_sha1(&data).as_bytes().to_vec();
   let sha512_hash = hash_sha512(&data).as_bytes().to_vec();
@@ -340,7 +348,7 @@ fn data_packet_server() {
   packet.extend(vec![0x00]);
   packet.extend(vec![0x00, 0x01, 0x26, 0x42, 0xAF, 0xFF]);
 
-  assert_eq!(packet_test, packet);
+  assert_eq!(packet_test.unwrap(), packet);
 }
 
 #[test]
@@ -588,12 +596,11 @@ fn parse_close_server() {
 #[test]
 fn build_to_parse_client_data() {
   let id = Uuid::new_v4();
-  let separator = "\u{0000}";
+  let separator = "\u{0000}".as_bytes().to_vec();
   let data = vec![0x0, 0x01, 0x26, 0x42, 0xAF, 0xFF];
   let packet = Client::build_data_packet(&id, &separator, &data);
 
-  let packet =
-    Server::parse_packet(&packet, &separator.as_bytes().to_vec()).unwrap();
+  let packet = Server::parse_packet(&packet.unwrap(), &separator).unwrap();
 
   match packet {
     | PacketType::Data(packet) => {
@@ -610,13 +617,12 @@ fn build_to_parse_client_data() {
 
 #[test]
 fn build_to_parse_client_auth() {
-  let separator = "\u{0000}";
-  let auth = String::from("(*HN)PIu)*&(hBI");
+  let separator = "\u{0000}".as_bytes().to_vec();
+  let auth = String::from("(*HN)PIu)*&(hBI").into_bytes();
   let ports: Vec<u16> = vec![6753, 11, 6, 9, 4, 2, 8];
-  let packet = Client::build_auth_packet(&auth, &ports, &separator.to_string());
+  let packet = Client::build_auth_packet(&auth, &ports, &separator);
 
-  let packet =
-    Server::parse_packet(&packet, &separator.as_bytes().to_vec()).unwrap();
+  let packet = Server::parse_packet(&packet.unwrap(), &separator).unwrap();
 
   match packet {
     | PacketType::Auth(packet) => {
@@ -625,7 +631,7 @@ fn build_to_parse_client_auth() {
       assert_eq!(packet.ports, ports);
       assert_eq!(packet.sha1, ());
       assert_eq!(packet.sha512, ());
-      assert_eq!(packet.body, auth.as_bytes().to_vec());
+      assert_eq!(packet.body, auth);
     },
     | _ => panic!("Packet is not a data packet"),
   }
@@ -635,12 +641,11 @@ fn build_to_parse_client_auth() {
 fn build_to_parse_client_close() {
   let id = Uuid::new_v4();
   println!("{id}");
-  let separator = "\u{0000}";
+  let separator = "\u{0000}".as_bytes().to_vec();
   let data = vec![];
-  let packet = Client::close_connection_packet(&id, &separator.to_string());
+  let packet = Client::close_connection_packet(&id, &separator);
 
-  let packet =
-    Server::parse_packet(&packet, &separator.as_bytes().to_vec()).unwrap();
+  let packet = Server::parse_packet(&packet.unwrap(), &separator).unwrap();
 
   match packet {
     | PacketType::Close(packet) => {
@@ -658,13 +663,12 @@ fn build_to_parse_client_close() {
 #[test]
 fn build_to_parse_server_data() {
   let id = Uuid::new_v4();
-  let separator = "\u{0000}";
+  let separator = "\u{0000}".as_bytes().to_vec();
   let port: u16 = 6753;
   let data = vec![0x0, 0x01, 0x26, 0x42, 0xAF, 0xFF];
   let packet = Server::build_data_packet(&id, &port, &separator, &data);
 
-  let packet =
-    Client::parse_packet(&packet, &separator.as_bytes().to_vec()).unwrap();
+  let packet = Client::parse_packet(&packet.unwrap(), &separator).unwrap();
 
   match packet {
     | PacketType::Data(packet) => {
@@ -682,12 +686,11 @@ fn build_to_parse_server_data() {
 #[test]
 fn build_to_parse_server_close() {
   let id = Uuid::new_v4();
-  let separator = "\u{0000}";
+  let separator = "\u{0000}".as_bytes().to_vec();
   let data: Vec<u8> = vec![];
-  let packet = Server::close_connection_packet(&id, &separator.to_string());
+  let packet = Server::close_connection_packet(&id, &separator);
 
-  let packet =
-    Client::parse_packet(&packet, &separator.as_bytes().to_vec()).unwrap();
+  let packet = Client::parse_packet(&packet.unwrap(), &separator).unwrap();
 
   match packet {
     | PacketType::Close(packet) => {

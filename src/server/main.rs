@@ -1,8 +1,8 @@
 mod config;
-mod slave;
 mod master;
+mod slave;
 
-use proxy_router::logging::{init_logger, LoggerSettings};
+use proxy::logging::{init_logger, LoggerSettings};
 
 use clap::{value_parser, Arg, ArgAction, Command};
 use signal_hook::{
@@ -11,7 +11,14 @@ use signal_hook::{
 };
 #[allow(unused_imports)]
 use simplelog::{debug, error, info, trace, warn};
-use std::{thread, sync::{atomic::{AtomicBool, Ordering}, Arc}};
+use std::{
+  sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+  },
+  thread,
+  time::Duration, process::exit,
+};
 
 fn main() {
   let mut logger_settings = LoggerSettings {
@@ -170,5 +177,18 @@ fn main() {
   });
 
   let config = config::get_settings();
-  master::MasterListener::start(&config, Arc::clone(&atomic));
+  let listener = master::MasterListener::new(
+    &config,
+    Arc::clone(&atomic),
+  );
+
+  while !atomic.load(Ordering::Relaxed) {
+    std::thread::sleep(Duration::from_millis(100));
+  }
+  let mut sleep: u16 = 0;
+  while !listener.is_finished() && sleep < 5000 {
+    std::thread::sleep(Duration::from_millis(100));
+    sleep += 100;
+  }
+  exit(0);
 }
