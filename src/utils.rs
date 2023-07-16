@@ -4,6 +4,7 @@ use std::{
 };
 
 use digest::Digest;
+use rand::{distributions::Alphanumeric, Rng};
 use sha1::Sha1;
 use sha2::Sha512;
 use uuid::Uuid;
@@ -55,41 +56,41 @@ pub enum PacketAction {
   AUTH,
 
   /// Auth try packet
-  /// 
+  ///
   /// This packet is used to confirm that the auth packet was received, and respond with the auth status.
-  /// 
+  ///
   /// # Usage
-  /// 
+  ///
   /// The packet must follow this format:
-  /// 
+  ///
   /// {action}{separator}{status}
-  /// 
+  ///
   /// Where status is either "success" or "forbiden".
-  /// 
+  ///
   /// ## Example
-  /// 
+  ///
   /// AUTHTRY\u0000success
   AUTHTRY,
 
   /// Heartbeat packet
-  /// 
+  ///
   /// This packet is used detect if the connection is still alive.
   /// The receiver end must respond as soon as possible with a heartbeat with the same nonce.
   /// If the receiver end does not respond in time, the connection is closed.
-  /// 
+  ///
   /// # Usage
-  /// 
+  ///
   /// The packet must follow this format:
-  /// 
+  ///
   /// HEARTBEAT{separator}{nonce}
-  /// 
+  ///
   /// ## Example
-  /// 
+  ///
   /// HEARTBEAT\u0000a1b2c3d4e5f6
   HEARTBEAT,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ParseErrorType {
   Type,
   Action,
@@ -99,7 +100,7 @@ pub enum ParseErrorType {
   Ports,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ParseError {
   Header(ParseErrorType),
   Other(ParseErrorType),
@@ -166,66 +167,132 @@ impl PacketAction {
   }
 }
 
-pub enum Server {}
-pub enum Client {}
-pub enum Data {}
-pub enum Auth {}
-pub enum Close {}
+pub struct Server;
+pub struct Client;
+pub struct Data;
+pub struct Auth;
+pub struct Close;
+pub struct AuthTry;
+pub struct Heartbeat;
 
-pub trait Environment {
-  type PortType;
+pub trait Environment {}
+impl Environment for Server {}
+impl Environment for Client {}
+
+pub trait PacketTrait<Env: Environment> {
+  type ID;
+  type PORT;
+  type PORTS;
+  type SHA1;
+  type SHA512;
 }
 
-impl Environment for Server {
-  type PortType = u16;
+impl PacketTrait<Client> for Data {
+  type SHA1 = String;
+  type SHA512 = String;
+  type PORTS = ();
+  type ID = Uuid;
+  type PORT = ();
 }
 
-impl Environment for Client {
-  type PortType = ();
+impl PacketTrait<Client> for Auth {
+  type SHA1 = ();
+  type SHA512 = ();
+  type PORTS = Vec<u16>;
+  type ID = ();
+  type PORT = ();
 }
 
-pub trait PacketTrait {
-  type Sha1Type;
-  type Sha512Type;
-  type PortsType;
-  type IDType;
+impl PacketTrait<Client> for Close {
+  type SHA1 = ();
+  type SHA512 = ();
+  type PORTS = ();
+  type ID = Uuid;
+  type PORT = ();
 }
 
-impl PacketTrait for Data {
-  type Sha1Type = String;
-  type Sha512Type = String;
-  type PortsType = ();
-  type IDType = Uuid;
+impl PacketTrait<Client> for AuthTry {
+  type SHA1 = ();
+  type SHA512 = ();
+  type PORTS = ();
+  type ID = ();
+  type PORT = ();
 }
 
-impl PacketTrait for Auth {
-  type Sha1Type = ();
-  type Sha512Type = ();
-  type PortsType = Vec<u16>;
-  type IDType = ();
+impl PacketTrait<Client> for Heartbeat {
+  type SHA1 = ();
+  type SHA512 = ();
+  type PORTS = ();
+  type ID = ();
+  type PORT = ();
 }
 
-impl PacketTrait for Close {
-  type Sha1Type = ();
-  type Sha512Type = ();
-  type PortsType = ();
-  type IDType = Uuid;
+impl PacketTrait<Server> for Data {
+  type SHA1 = String;
+  type SHA512 = String;
+  type PORTS = ();
+  type ID = Uuid;
+  type PORT = u16;
 }
 
-pub struct Packet<Env: Environment, PacketSubset: PacketTrait> {
+impl PacketTrait<Server> for Auth {
+  type SHA1 = ();
+  type SHA512 = ();
+  type PORTS = ();
+  type ID = ();
+  type PORT = ();
+}
+
+impl PacketTrait<Server> for Close {
+  type SHA1 = ();
+  type SHA512 = ();
+  type PORTS = ();
+  type ID = Uuid;
+  type PORT = ();
+}
+
+impl PacketTrait<Server> for AuthTry {
+  type SHA1 = ();
+  type SHA512 = ();
+  type PORTS = ();
+  type ID = ();
+  type PORT = ();
+}
+
+impl PacketTrait<Server> for Heartbeat {
+  type SHA1 = ();
+  type SHA512 = ();
+  type PORTS = ();
+  type ID = ();
+  type PORT = ();
+}
+
+pub struct Packet<Env: Environment, PacketSubset>
+where
+  PacketSubset: PacketTrait<Env>,
+{
   pub action: PacketAction,
-  pub id: PacketSubset::IDType,
-  pub port: Env::PortType,
-  pub ports: PacketSubset::PortsType,
-  pub sha1: PacketSubset::Sha1Type,
-  pub sha512: PacketSubset::Sha512Type,
+  pub id: PacketSubset::ID,
+  pub port: PacketSubset::PORT,
+  pub ports: PacketSubset::PORTS,
+  pub sha1: PacketSubset::SHA1,
+  pub sha512: PacketSubset::SHA512,
   pub body: Vec<u8>,
 }
 
-pub enum PacketType<Env: Environment> {
+pub enum PacketType<Env: Environment>
+where
+  Data: PacketTrait<Env>,
+  Auth: PacketTrait<Env>,
+  Close: PacketTrait<Env>,
+  AuthTry: PacketTrait<Env>,
+  Heartbeat: PacketTrait<Env>,
+{
   Data(Packet<Env, Data>),
   Auth(Packet<Env, Auth>),
   Close(Packet<Env, Close>),
+  AuthTry(Packet<Env, AuthTry>),
+  Heartbeat(Packet<Env, Heartbeat>),
 }
 
 pub fn hash_sha1(data: &Vec<u8>) -> String {
@@ -294,7 +361,7 @@ impl Server {
     Ok(packet)
   }
 
-  pub fn close_connection_packet(
+  pub fn build_close_packet(
     id: &Uuid, separator: &Vec<u8>,
   ) -> Result<Vec<u8>, FromUtf8Error> {
     let separator = String::from_utf8(separator.to_owned())?;
@@ -303,7 +370,42 @@ impl Server {
       "{} {id}{separator}",
       PacketAction::CLOSE.value()
     );
-    Ok(packet.as_bytes().to_vec())
+    Ok(packet.into_bytes())
+  }
+
+  pub fn build_authtry_packet(
+    separator: &Vec<u8>, success: &bool,
+  ) -> Result<Vec<u8>, FromUtf8Error> {
+    let separator = String::from_utf8(separator.to_owned())?;
+    let success = if *success {
+      "success"
+    } else {
+      "forbidden"
+    };
+    let packet = format!(
+      "{}{separator}{success}",
+      PacketAction::AUTHTRY.value()
+    );
+    Ok(packet.into_bytes())
+  }
+
+  pub fn build_heartbeat_packet(
+    separator: &Vec<u8>, nonce: &String,
+  ) -> Result<Vec<u8>, FromUtf8Error> {
+    let separator = String::from_utf8(separator.to_owned())?;
+    let packet = format!(
+      "{}{separator}{nonce}",
+      PacketAction::HEARTBEAT.value()
+    );
+    Ok(packet.into_bytes())
+  }
+
+  pub fn gen_nonce() -> String {
+    rand::thread_rng()
+      .sample_iter(&Alphanumeric)
+      .take(32)
+      .map(char::from)
+      .collect()
   }
 
   ///
@@ -393,8 +495,16 @@ impl Server {
           body,
         }))
       },
-      PacketAction::AUTHTRY => todo!("AUTHTRY is currently not implemented"),
-      PacketAction::HEARTBEAT => todo!("HEARTBEAT is currently not implemented"),
+      | PacketAction::AUTHTRY => Err(ParseError::Other(ParseErrorType::Type)),
+      | PacketAction::HEARTBEAT => Ok(PacketType::Heartbeat(Packet {
+        action,
+        id: (),
+        port: (),
+        ports: (),
+        sha1: (),
+        sha512: (),
+        body,
+      })),
     }
   }
 }
@@ -416,7 +526,7 @@ impl Client {
     Ok(packet)
   }
 
-  pub fn close_connection_packet(
+  pub fn build_close_packet(
     id: &Uuid, separator: &Vec<u8>,
   ) -> Result<Vec<u8>, FromUtf8Error> {
     let separator = String::from_utf8(separator.to_owned())?;
@@ -425,7 +535,7 @@ impl Client {
       "{} {id}{separator}",
       PacketAction::CLOSE.value()
     );
-    Ok(packet.as_bytes().to_vec())
+    Ok(packet.into_bytes())
   }
 
   pub fn build_auth_packet(
@@ -442,7 +552,19 @@ impl Client {
       "{} {ports_string}{separator}{auth}",
       PacketAction::AUTH.value()
     );
-    Ok(packet.as_bytes().to_vec())
+    Ok(packet.into_bytes())
+  }
+
+  pub fn build_heartbeat_packet(
+    separator: &Vec<u8>, nonce: &Vec<u8>,
+  ) -> Result<Vec<u8>, FromUtf8Error> {
+    let separator = String::from_utf8(separator.to_owned())?;
+    let mut packet = format!(
+      "{}{separator}",
+      PacketAction::HEARTBEAT.value()
+    ).into_bytes();
+    packet.extend(nonce);
+    Ok(packet)
   }
 
   ///
@@ -453,14 +575,23 @@ impl Client {
   ) -> Result<PacketType<Server>, ParseError> {
     let (header, body) = split(&packet, separator)
       .ok_or(ParseError::Header(ParseErrorType::Type))?;
-    let (action, p) = split(&header, &" ".as_bytes().to_vec()).ok_or(
-      ParseError::Header(ParseErrorType::Action),
-    )?;
 
-    let action =
-      PacketAction::from_string(String::from_utf8(action).ok().ok_or(
-        ParseError::Other(ParseErrorType::Action),
-      )?);
+    let action = split(&header, &" ".as_bytes().to_vec());
+
+    let (action, p) = if action.is_none() {
+      let action =
+        PacketAction::from_string(String::from_utf8(header).ok().ok_or(
+          ParseError::Other(ParseErrorType::Action),
+        )?);
+      (action, vec![])
+    } else {
+      let (action, p) = action.unwrap();
+      let action =
+        PacketAction::from_string(String::from_utf8(action).ok().ok_or(
+          ParseError::Other(ParseErrorType::Action),
+        )?);
+      (action, p)
+    };
 
     match &action {
       | PacketAction::DATA => {
@@ -508,16 +639,32 @@ impl Client {
         Ok(PacketType::Close(Packet {
           action,
           id,
-          port: 0,
+          port: (),
           ports: (),
           sha1: (),
           sha512: (),
           body,
         }))
       },
-      | PacketAction::AUTH => unimplemented!("AUTH is not suported client side"),
-      | PacketAction::AUTHTRY => todo!("AUTHTRY is currently not implemented"),
-      | PacketAction::HEARTBEAT => todo!("HEARTBEAT is currently not implemented"),
+      | PacketAction::AUTH => Err(ParseError::Other(ParseErrorType::Type)),
+      | PacketAction::AUTHTRY => Ok(PacketType::AuthTry(Packet {
+        action,
+        id: (),
+        port: (),
+        ports: (),
+        sha1: (),
+        sha512: (),
+        body,
+      })),
+      | PacketAction::HEARTBEAT => Ok(PacketType::Heartbeat(Packet {
+        action,
+        id: (),
+        port: (),
+        ports: (),
+        sha1: (),
+        sha512: (),
+        body,
+      })),
     }
   }
 }

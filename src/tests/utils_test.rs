@@ -1,7 +1,7 @@
 #[allow(unused_imports)]
 use crate::utils::{
   hash_sha1, hash_sha512, split, Client, Packet, PacketAction, PacketType,
-  Server,
+  Server, ParseError, ParseErrorType
 };
 #[allow(unused_imports)]
 use std::str::FromStr;
@@ -50,7 +50,7 @@ fn split_big() {
     );
     assert_eq!(result.1, vec![0x2, 0x4, 0xA, 0xF]);
   } else {
-    assert_eq!(true, false, "Got: None");
+    panic!("Got: None");
   }
 }
 
@@ -99,7 +99,7 @@ fn split_byte() {
       vec![0x0, 0x0, 0x2, 0x4, 0xA, 0xF]
     );
   } else {
-    assert_eq!(true, false, "Got: None");
+    panic!("Got: None");
   }
 }
 
@@ -170,7 +170,7 @@ fn split_more() {
       ]
     );
   } else {
-    assert_eq!(true, false, "Got: None");
+    panic!("Got: None");
   }
 }
 
@@ -233,7 +233,7 @@ fn split_to_none() {
     let res: Vec<u8> = vec![];
     assert_eq!(result.1, res);
   } else {
-    assert_eq!(true, false, "Got: None");
+    panic!("Got: None");
   }
 }
 
@@ -276,7 +276,7 @@ fn split_some_to_none() {
     );
     assert_eq!(result.1, vec![0x9, 0x8, 0x7, 0x4, 0x2]);
   } else {
-    assert_eq!(true, false, "Got: None");
+    panic!("Got: None");
   }
 }
 
@@ -461,7 +461,7 @@ fn parse_auth_client() {
 
   match Client::parse_packet(&packet.clone(), &separator) {
     | Ok(_) => panic!("Packet should not be parsed"),
-    | _ => (),
+    | Err(err) => assert_eq!(err, ParseError::Other(ParseErrorType::Type)),
   }
 }
 
@@ -480,7 +480,7 @@ fn parse_close_client() {
     | Ok(packet_test) => match packet_test {
       | PacketType::Close(packet_test) => {
         assert_eq!(packet_test.id, id);
-        assert_eq!(packet_test.port, 0);
+        assert_eq!(packet_test.port, ());
         assert_eq!(packet_test.ports, ());
         assert_eq!(packet_test.sha1, ());
         assert_eq!(packet_test.sha512, ());
@@ -643,7 +643,7 @@ fn build_to_parse_client_close() {
   println!("{id}");
   let separator = "\u{0000}".as_bytes().to_vec();
   let data = vec![];
-  let packet = Client::close_connection_packet(&id, &separator);
+  let packet = Client::build_close_packet(&id, &separator);
 
   let packet = Server::parse_packet(&packet.unwrap(), &separator).unwrap();
 
@@ -688,19 +688,80 @@ fn build_to_parse_server_close() {
   let id = Uuid::new_v4();
   let separator = "\u{0000}".as_bytes().to_vec();
   let data: Vec<u8> = vec![];
-  let packet = Server::close_connection_packet(&id, &separator);
+  let packet = Server::build_close_packet(&id, &separator);
 
   let packet = Client::parse_packet(&packet.unwrap(), &separator).unwrap();
 
   match packet {
     | PacketType::Close(packet) => {
       assert_eq!(packet.id, id);
-      assert_eq!(packet.port, 0);
+      assert_eq!(packet.port, ());
       assert_eq!(packet.ports, ());
       assert_eq!(packet.sha1, ());
       assert_eq!(packet.sha512, ());
       assert_eq!(packet.body, data);
     },
     | _ => panic!("Packet is not a data packet"),
+  }
+}
+
+#[test]
+fn build_to_parse_server_authtry_failed() {
+  let separator = "\u{0000}".as_bytes().to_vec();
+  let packet = Server::build_authtry_packet(&separator, &false);
+
+  let parsed_packet = Client::parse_packet(&packet.unwrap(), &separator).unwrap();
+
+  match parsed_packet {
+    | PacketType::AuthTry(packet) => {
+      assert_eq!(packet.id, ());
+      assert_eq!(packet.port, ());
+      assert_eq!(packet.ports, ());
+      assert_eq!(packet.sha1, ());
+      assert_eq!(packet.sha512, ());
+      assert_eq!(packet.body, "forbidden".as_bytes().to_vec());
+    },
+    | _ => panic!("Packet is not a authtry packet"),
+  }
+}
+
+#[test]
+fn build_to_parse_server_authtry_success() {
+  let separator = "\u{0000}".as_bytes().to_vec();
+  let packet = Server::build_authtry_packet(&separator, &true);
+
+  let parsed_packet = Client::parse_packet(&packet.unwrap(), &separator).unwrap();
+
+  match parsed_packet {
+    | PacketType::AuthTry(packet) => {
+      assert_eq!(packet.id, ());
+      assert_eq!(packet.port, ());
+      assert_eq!(packet.ports, ());
+      assert_eq!(packet.sha1, ());
+      assert_eq!(packet.sha512, ());
+      assert_eq!(packet.body, "success".as_bytes().to_vec());
+    },
+    | _ => panic!("Packet is not a authtry packet"),
+  }
+}
+
+#[test]
+fn build_to_parse_server_heartbeat() {
+  let separator = "\u{0000}".as_bytes().to_vec();
+  let nonce = Server::gen_nonce();
+  let packet = Server::build_heartbeat_packet(&separator, &nonce);
+
+  let parsed_packet = Client::parse_packet(&packet.unwrap(), &separator).unwrap();
+
+  match parsed_packet {
+    | PacketType::Heartbeat(packet) => {
+      assert_eq!(packet.id, ());
+      assert_eq!(packet.port, ());
+      assert_eq!(packet.ports, ());
+      assert_eq!(packet.sha1, ());
+      assert_eq!(packet.sha512, ());
+      assert_eq!(packet.body, nonce.into_bytes());
+    },
+    | _ => panic!("Packet is not a heartbeat packet"),
   }
 }
