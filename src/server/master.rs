@@ -14,7 +14,8 @@ use tokio::{
   io::AsyncReadExt,
   net::{TcpListener, TcpStream},
   runtime::{self, Runtime as TokioRuntime},
-  sync::Mutex, time::sleep,
+  sync::Mutex,
+  time::sleep,
 };
 use uuid::Uuid;
 

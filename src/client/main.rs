@@ -227,7 +227,9 @@ fn main() {
             if status > 0 {
               debug!("Tunnel has died, resurrecting");
               let tunnel = &config.ssh_config.create_tunnel(
-                tunnel.source_port, tunnel.source_host.to_owned(), tunnel.target_port,
+                tunnel.source_port,
+                tunnel.source_host.to_owned(),
+                tunnel.target_port,
               );
               match tunnel {
                 | Ok(tunnel) => debug!(

@@ -1,7 +1,7 @@
 #[allow(unused_imports)]
 use crate::utils::{
   hash_sha1, hash_sha512, split, Client, Packet, PacketAction, PacketType,
-  Server, ParseError, ParseErrorType
+  ParseError, ParseErrorType, Server,
 };
 #[allow(unused_imports)]
 use std::str::FromStr;
@@ -461,7 +461,10 @@ fn parse_auth_client() {
 
   match Client::parse_packet(&packet.clone(), &separator) {
     | Ok(_) => panic!("Packet should not be parsed"),
-    | Err(err) => assert_eq!(err, ParseError::Other(ParseErrorType::Type)),
+    | Err(err) => assert_eq!(
+      err,
+      ParseError::Other(ParseErrorType::Type)
+    ),
   }
 }
 
@@ -710,7 +713,8 @@ fn build_to_parse_server_authtry_failed() {
   let separator = "\u{0000}".as_bytes().to_vec();
   let packet = Server::build_authtry_packet(&separator, &false);
 
-  let parsed_packet = Client::parse_packet(&packet.unwrap(), &separator).unwrap();
+  let parsed_packet =
+    Client::parse_packet(&packet.unwrap(), &separator).unwrap();
 
   match parsed_packet {
     | PacketType::AuthTry(packet) => {
@@ -719,7 +723,10 @@ fn build_to_parse_server_authtry_failed() {
       assert_eq!(packet.ports, ());
       assert_eq!(packet.sha1, ());
       assert_eq!(packet.sha512, ());
-      assert_eq!(packet.body, "forbidden".as_bytes().to_vec());
+      assert_eq!(
+        packet.body,
+        "forbidden".as_bytes().to_vec()
+      );
     },
     | _ => panic!("Packet is not a authtry packet"),
   }
@@ -730,7 +737,8 @@ fn build_to_parse_server_authtry_success() {
   let separator = "\u{0000}".as_bytes().to_vec();
   let packet = Server::build_authtry_packet(&separator, &true);
 
-  let parsed_packet = Client::parse_packet(&packet.unwrap(), &separator).unwrap();
+  let parsed_packet =
+    Client::parse_packet(&packet.unwrap(), &separator).unwrap();
 
   match parsed_packet {
     | PacketType::AuthTry(packet) => {
@@ -739,7 +747,10 @@ fn build_to_parse_server_authtry_success() {
       assert_eq!(packet.ports, ());
       assert_eq!(packet.sha1, ());
       assert_eq!(packet.sha512, ());
-      assert_eq!(packet.body, "success".as_bytes().to_vec());
+      assert_eq!(
+        packet.body,
+        "success".as_bytes().to_vec()
+      );
     },
     | _ => panic!("Packet is not a authtry packet"),
   }
@@ -751,7 +762,8 @@ fn build_to_parse_server_heartbeat() {
   let nonce = Server::gen_nonce();
   let packet = Server::build_heartbeat_packet(&separator, &nonce);
 
-  let parsed_packet = Client::parse_packet(&packet.unwrap(), &separator).unwrap();
+  let parsed_packet =
+    Client::parse_packet(&packet.unwrap(), &separator).unwrap();
 
   match parsed_packet {
     | PacketType::Heartbeat(packet) => {

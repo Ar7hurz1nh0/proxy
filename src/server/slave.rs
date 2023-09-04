@@ -10,7 +10,12 @@ use std::{
   thread,
   time::Duration,
 };
-use tokio::{runtime::Runtime, sync::Mutex, net::{TcpListener, TcpStream}, io::AsyncReadExt};
+use tokio::{
+  io::AsyncReadExt,
+  net::{TcpListener, TcpStream},
+  runtime::Runtime,
+  sync::Mutex,
+};
 use uuid::Uuid;
 
 use crate::slave;
@@ -46,7 +51,7 @@ impl SlaveListener {
   pub async fn begin(
     config: ServerConfig, connections: Arc<Mutex<HashMap<Uuid, SenderPacket>>>,
     runtime: Arc<Runtime>, drop_handler: &Arc<AtomicBool>,
-  ) -> Result<(), Error> { 
+  ) -> Result<(), Error> {
     let slave = SlaveListener {
       config: config.to_owned(),
       connections: Arc::clone(&connections),
@@ -56,15 +61,26 @@ impl SlaveListener {
     let slave = Arc::new(slave);
 
     let listener = runtime.spawn(async move {
-      let listener = TcpListener::bind((config.listen.addr.as_str(), config.listen.port)).await.unwrap();
-      info!("Listening on {}:{}", config.listen.addr, config.listen.port);
+      let listener = TcpListener::bind((
+        config.listen.addr.as_str(),
+        config.listen.port,
+      ))
+      .await
+      .unwrap();
+      info!(
+        "Listening on {}:{}",
+        config.listen.addr, config.listen.port
+      );
       loop {
         let (socket, addr) = listener.accept().await.unwrap();
         let uuid = Uuid::new_v4();
-        slave.connections.lock().await.insert(uuid, SenderPacket {
-          socket: Arc::new(Mutex::new(socket)),
-          uuid: uuid.to_owned(),
-        });
+        slave.connections.lock().await.insert(
+          uuid,
+          SenderPacket {
+            socket: Arc::new(Mutex::new(socket)),
+            uuid: uuid.to_owned(),
+          },
+        );
         let slave_clone = Arc::clone(&slave);
         Arc::clone(&slave).runtime.spawn(async move {
           slave_clone.on_new_connection(uuid).await.unwrap();
@@ -77,7 +93,14 @@ impl SlaveListener {
             if bytes_read == 0 {
               break;
             }
-            slave_clone.on_data(Arc::clone(&socket), uuid, buffer[..bytes_read].to_vec()).await.unwrap();
+            slave_clone
+              .on_data(
+                Arc::clone(&socket),
+                uuid,
+                buffer[..bytes_read].to_vec(),
+              )
+              .await
+              .unwrap();
           }
         });
       }
@@ -94,11 +117,13 @@ impl SlaveListener {
     Ok(())
   }
 
-  pub async fn on_new_connection(
-    &self, uuid: Uuid,
-  ) -> Result<(), Error> { todo!("Implement slave server") }
+  pub async fn on_new_connection(&self, uuid: Uuid) -> Result<(), Error> {
+    todo!("Implement slave server")
+  }
 
   pub async fn on_data(
     &self, mut socket: Arc<Mutex<TcpStream>>, uuid: Uuid, data: Vec<u8>,
-  ) -> Result<(), Error> { todo!("Implement slave server") }
+  ) -> Result<(), Error> {
+    todo!("Implement slave server")
+  }
 }

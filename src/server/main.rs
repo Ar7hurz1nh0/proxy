@@ -12,12 +12,13 @@ use signal_hook::{
 #[allow(unused_imports)]
 use simplelog::{debug, error, info, trace, warn};
 use std::{
+  process::exit,
   sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
   },
   thread,
-  time::Duration, process::exit,
+  time::Duration,
 };
 
 fn main() {
@@ -177,10 +178,7 @@ fn main() {
   });
 
   let config = config::get_settings();
-  let listener = master::MasterListener::new(
-    &config,
-    Arc::clone(&atomic),
-  );
+  let listener = master::MasterListener::new(&config, Arc::clone(&atomic));
 
   while !atomic.load(Ordering::Relaxed) {
     std::thread::sleep(Duration::from_millis(100));

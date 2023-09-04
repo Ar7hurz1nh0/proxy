@@ -562,7 +562,8 @@ impl Client {
     let mut packet = format!(
       "{}{separator}",
       PacketAction::HEARTBEAT.value()
-    ).into_bytes();
+    )
+    .into_bytes();
     packet.extend(nonce);
     Ok(packet)
   }
