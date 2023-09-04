@@ -1,10 +1,12 @@
 mod config;
-mod socket;
+// mod socket; // unused atm until I want to add UDP support
+mod tunnel;
 
+use crate::tunnel::Tunnel;
 use std::{
   sync::{
     atomic::{AtomicBool, Ordering},
-    Arc,
+    Arc, Mutex,
   },
   thread,
 };
@@ -168,12 +170,103 @@ fn main() {
       match sig {
         | SIGINT => warn!("Received SIGINT"),
         | SIGTERM => warn!("Received SIGTERM"),
-        | _ => unreachable!(),
+        | _ => warn!("Unexpected signal"),
       }
       atomic_clone.store(true, Ordering::SeqCst);
     }
   });
 
   let config = config::get_settings();
-  socket::connect(&config, Arc::clone(&atomic));
+  // socket::connect(&config, Arc::clone(&atomic));
+
+  let tunnels: Arc<Mutex<Vec<Tunnel>>> = Arc::new(Mutex::new(Vec::new()));
+
+  for target in config.targets {
+    let tunnel = config.ssh_config.create_tunnel(
+      target.source_port,
+      target.address.to_owned(),
+      target.target_port,
+    );
+    match tunnel {
+      | Ok(tunnel) => {
+        tunnels.lock().unwrap().push(tunnel);
+        info!(
+          "Tunnel {}:{} <- {}:{} created!",
+          target.address,
+          target.source_port,
+          &config.ssh_config.host,
+          target.target_port
+        )
+      },
+      | Err(err) => {
+        error!(
+          "Error creating {}:{} <- {}:{} tunnel: {}",
+          target.address,
+          target.source_port,
+          &config.ssh_config.host,
+          target.target_port,
+          err
+        );
+      },
+    }
+  }
+
+  while &tunnels.lock().unwrap().len() > &0_usize {
+    if atomic.load(Ordering::Relaxed) {
+      warn!("Stopping tunnel resurrection service!");
+      break;
+    }
+    let tunnels_arc = Arc::clone(&tunnels);
+    trace!("Acquiring tunnels lock");
+    let mut tunnels_lock = tunnels_arc.lock().unwrap();
+    trace!("Tunnels lock acquired");
+    for tunnel in tunnels_lock.iter_mut() {
+      match tunnel.proccess.try_wait() {
+        | Ok(Some(status)) => {
+          if let Some(status) = status.code() {
+            if status > 0 {
+              debug!("Tunnel has died, resurrecting");
+              let tunnel = &config.ssh_config.create_tunnel(
+                tunnel.source_port, tunnel.source_host.to_owned(), tunnel.target_port,
+              );
+              match tunnel {
+                | Ok(tunnel) => debug!(
+                  "{}:{} <- {}:{} tunnel resurrected",
+                  tunnel.source_host,
+                  tunnel.source_port,
+                  &config.ssh_config.host,
+                  tunnel.target_port
+                ),
+                | Err(err) => error!("Error while resurrecting tunnel: {err}"),
+              }
+            } else {
+              warn!("Tunnel has terminated, not resurrecting");
+              Arc::clone(&tunnels)
+                .lock()
+                .unwrap()
+                .retain(|t| t.proccess.id() != tunnel.proccess.id())
+            }
+          }
+        },
+        | Ok(None) => (),
+        | Err(err) => error!("Error checking tunnel: {}", err),
+      }
+    }
+    thread::sleep(std::time::Duration::from_millis(100));
+  }
+
+  let tunnels = Arc::clone(&tunnels);
+
+  for tunnel in tunnels.lock().unwrap().iter_mut() {
+    match tunnel.proccess.kill() {
+      | Ok(_) => info!(
+        "{}:{} <- {}:{} tunnel killed!",
+        tunnel.source_host,
+        tunnel.source_port,
+        &config.ssh_config.host,
+        tunnel.target_port
+      ),
+      | Err(err) => error!("Error killing tunnel: {}", err),
+    }
+  }
 }
